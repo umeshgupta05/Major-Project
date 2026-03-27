@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MSTCT Sepsis Prediction — Pipeline Dashboard</title>
+  <meta name="description" content="Interactive pipeline visualization for the Multi-Scale TCN + Transformer (MSTCT) sepsis prediction model." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <canvas id="particleCanvas" aria-hidden="true"></canvas>
+
+  <!-- PIPELINE TRACKER -->
+  <nav class="pipeline-tracker" id="pipelineTracker">
+    <div class="tracker-inner">
+      <div class="step active" data-step="0"><span class="step__num">1</span><span class="step__label">Upload</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="1"><span class="step__num">2</span><span class="step__label">Preprocess</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="2"><span class="step__num">3</span><span class="step__label">Features</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="3"><span class="step__num">4</span><span class="step__label">TCN</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="4"><span class="step__num">5</span><span class="step__label">Transformer</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="5"><span class="step__num">6</span><span class="step__label">Output</span></div>
+    </div>
+    <div class="tracker-progress" id="trackerProgress"></div>
+  </nav>
+
+  <!-- STAGE VIEWPORT -->
+  <div class="stage-viewport">
+
+    <!-- STAGE 0: UPLOAD -->
+    <section class="stage active" id="stage-0">
+      <div class="stage__content">
+        <header class="stage-hero">
+          <p class="eyebrow">Sepsis Prediction Engine</p>
+          <h1>MSTCT <span class="accent">Pipeline</span></h1>
+          <p class="sub" id="artifactStatus">Loading model artifacts…</p>
+        </header>
+        <div class="stage-grid cols-2-wide">
+          <div class="glass-card">
+            <h2>⬆ Upload Patient Data</h2>
+            <form id="predictForm">
+              <label class="upload-zone" id="uploadZone" for="csvFile">
+                <input type="file" id="csvFile" accept=".csv" />
+                <div class="upload-zone__icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+                <p class="upload-zone__text">Drag &amp; drop a CSV file, or <strong>click to browse</strong></p>
+                <p class="upload-zone__hint" id="selectedFileInfo">Supported: .csv patient time-series data</p>
+              </label>
+              <div class="input-row">
+                <input type="text" id="patientId" placeholder="Patient ID (optional)" autocomplete="off" />
+                <button type="submit" id="submitBtn"><span id="btnText">Run Pipeline</span><span id="btnSpinner" class="spinner hidden"></span></button>
+              </div>
+            </form>
+            <p class="upload-status" id="uploadStatus"></p>
+          </div>
+          <div class="glass-card">
+            <h2>Model Architecture</h2>
+            <div id="modelArchContent"><p class="muted">Loading…</p></div>
+            <div class="metrics-bar" id="metricsBar"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAGE 1: PREPROCESSING -->
+    <section class="stage" id="stage-1">
+      <div class="stage__content">
+        <div class="stage-hero">
+          <p class="eyebrow">Stage 2 — Data Preprocessing</p>
+          <h1>Cleaning &amp; <span class="accent">Imputation</span></h1>
+          <p class="sub">Filling missing values via interpolation, forward/backward fill, and median substitution</p>
+        </div>
+        <!-- Animated operation: missing cell counter -->
+        <div class="op-section" id="prepOp1" style="display:none;"></div>
+        <!-- Animated operation: before/after bar chart transition -->
+        <div class="op-section" id="prepOp2" style="display:none;">
+          <div class="glass-card"><h3>Missing Data Transformation</h3>
+            <div class="chart-dual"><div class="chart-half"><p class="chart-label text-amber">● Before Cleaning</p><div class="chart-container"><canvas id="missingBeforeChart"></canvas></div></div>
+            <div class="chart-half"><p class="chart-label text-accent">● After Cleaning</p><div class="chart-container"><canvas id="missingAfterChart"></canvas></div></div></div>
+          </div>
+        </div>
+        <!-- Animated table: cells turning from null to filled -->
+        <div class="op-section" id="prepOp3" style="display:none;">
+          <div class="stage-grid cols-2">
+            <div class="glass-card"><h3>Raw Input <span class="muted">(first 8 rows)</span></h3><div class="table-scroll" id="rawTableWrap"></div></div>
+            <div class="glass-card"><h3>After Cleaning <span class="muted">(nulls filled)</span></h3><div class="table-scroll" id="cleanTableWrap"></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAGE 2: FEATURES -->
+    <section class="stage" id="stage-2">
+      <div class="stage__content">
+        <div class="stage-hero">
+          <p class="eyebrow">Stage 3 — Feature Engineering</p>
+          <h1>Transform &amp; <span class="accent">Windowing</span></h1>
+          <p class="sub">Deriving new features, scaling values, and slicing data into fixed-length windows</p>
+        </div>
+        <!-- Feature creation animation -->
+        <div class="op-section" id="featOp1" style="display:none;"></div>
+        <!-- Sliding window animation -->
+        <div class="op-section" id="featOp2" style="display:none;">
+          <div class="glass-card"><h3>Sliding Window Extraction</h3><canvas id="windowCanvas" height="200"></canvas><p class="muted" id="windowCaption" style="margin-top:8px;font-size:12px;text-align:center;"></p></div>
+        </div>
+        <!-- Tensor shape -->
+        <div class="op-section" id="featOp3" style="display:none;">
+          <div class="tensor-shape-display" id="tensorShapeDisplay"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAGE 3: TCN -->
+    <section class="stage" id="stage-3">
+      <div class="stage__content">
+        <div class="stage-hero">
+          <p class="eyebrow">Stage 4 — Temporal Convolution Network</p>
+          <h1>Multi-Scale <span class="accent">TCN</span></h1>
+          <p class="sub">Parallel causal convolutions at different kernel sizes extract temporal patterns</p>
+        </div>
+        <!-- TCN diagram canvas -->
+        <div class="op-section" id="tcnOp1" style="display:none;">
+          <div class="glass-card"><h3>Multi-Scale Convolution</h3><canvas id="tcnCanvas" height="280"></canvas></div>
+        </div>
+        <!-- Tensor stats -->
+        <div class="op-section" id="tcnOp2" style="display:none;">
+          <div class="stage-grid cols-2" id="tcnStats"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAGE 4: TRANSFORMER -->
+    <section class="stage" id="stage-4">
+      <div class="stage__content">
+        <div class="stage-hero">
+          <p class="eyebrow">Stage 5 — Transformer Encoder</p>
+          <h1>Self-Attention <span class="accent">Encoder</span></h1>
+          <p class="sub">Multi-head self-attention learns which timesteps matter most for prediction</p>
+        </div>
+        <!-- Attention animation + heatmap -->
+        <div class="op-section" id="transOp1" style="display:none;">
+          <div class="stage-grid cols-2">
+            <div class="glass-card"><h3>Attention Computation</h3><canvas id="attnDiagramCanvas" height="260"></canvas></div>
+            <div class="glass-card"><h3>Attention Heatmap</h3><div class="heatmap-wrap"><canvas id="heatmapCanvas" width="320" height="320"></canvas><p class="heatmap-label">Token similarity (last window)</p></div></div>
+          </div>
+        </div>
+        <!-- Transformer stats -->
+        <div class="op-section" id="transOp2" style="display:none;">
+          <div class="stage-grid cols-2" id="transStats"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STAGE 5: OUTPUT -->
+    <section class="stage" id="stage-5">
+      <div class="stage__content">
+        <div class="stage-hero">
+          <p class="eyebrow">Stage 6 — Final Output</p>
+          <h1>Prediction <span class="accent">Result</span></h1>
+          <p class="sub">Sigmoid activation → threshold comparison → classification</p>
+        </div>
+        <!-- Sigmoid visualization -->
+        <div class="op-section" id="outOp0" style="display:none;">
+          <div class="glass-card"><h3>Sigmoid Classification</h3><canvas id="sigmoidCanvas" height="200"></canvas></div>
+        </div>
+        <div class="prediction-banner" id="predictionBanner"></div>
+        <div class="op-section" id="outOp1" style="display:none;">
+          <div class="stage-grid cols-2">
+            <div class="glass-card"><h3>Risk Gauge</h3><div id="riskGaugeWrap"></div></div>
+            <div class="glass-card"><h3>Per-Window Probabilities</h3><div class="chart-container"><canvas id="probChart"></canvas></div></div>
+          </div>
+        </div>
+        <div class="op-section" id="outOp2" style="display:none;">
+          <div class="stage-grid cols-3" id="metricsRow"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- STAGE NAV BAR -->
+  <div class="stage-nav" id="stageNav">
+    <button class="nav-btn nav-prev" id="prevBtn" disabled>← Previous</button>
+    <span class="nav-label" id="navLabel">Stage 1 of 6</span>
+    <button class="nav-btn nav-next" id="nextBtn">Next →</button>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
